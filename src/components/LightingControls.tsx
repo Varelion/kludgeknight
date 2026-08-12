@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useToast } from '../hooks/useToast';
 import type { KeyboardDevice } from '../models/KeyboardDevice';
 import type { LightingMode } from '../types/keyboard';
@@ -8,7 +8,19 @@ import { LightingNotSupportedError, RGBNotSupportedError } from '../errors/Kludg
 import { ERROR_MESSAGES } from '../constants/errorMessages';
 import { ColorWheel } from './ColorWheel';
 import { Badge } from '@/components/ui/badge';
-import { transFlagProfiles, buildStripedPerKeyColors, type ColorProfile } from '../utils/transFlagColorProfiles';
+import { colorProfiles, colorProfileGroups, type ColorProfile } from '../utils/colorProfiles';
+import { LightingPainter } from './LightingPainter';
+import { Switch } from '@/components/ui/switch';
+import type { PerKeyColors } from '../models/LightingCodec';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const SPEED_LABELS = ['Very Slow', 'Slow', 'Normal', 'Fast', 'Very Fast'];
 const SLEEP_LABELS = ['5 min', '10 min', '20 min', '30 min', 'Off'];
@@ -28,6 +40,7 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
   const [showBottomShadow, setShowBottomShadow] = useState(false);
   const [activeColorProfileId, setActiveColorProfileId] = useState<string | null>(null);
   const [applyingColorProfileId, setApplyingColorProfileId] = useState<string | null>(null);
+  const [advancedMode, setAdvancedMode] = useState(false);
 
   const isDemo = !!device.isDemo;
   const selectedModeIndex = settings?.modeIndex ?? null;
@@ -101,6 +114,42 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
     };
   }, [settings, device, toast]);
 
+  // Read through a ref so the painter's apply callback can stay referentially
+  // stable - it sits in a debounced effect's deps, and a new identity every
+  // render would re-fire the write.
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  const applyPerKeyColors = useCallback(async (colors: PerKeyColors) => {
+    if (!customRgbMode) return;
+
+    try {
+      const current = settingsRef.current;
+      if (current && current.modeIndex !== customRgbMode.index) {
+        const next = { ...current, modeIndex: customRgbMode.index };
+        await device.setLighting(next);
+        setSettings(next);
+      }
+      await device.setPerKeyColors(colors);
+    } catch (error) {
+      console.error('Failed to apply painted colors:', error);
+
+      let errorMessage: string = ERROR_MESSAGES.LIGHTING_UPDATE_FAILED;
+      if (error instanceof RGBNotSupportedError) {
+        errorMessage = ERROR_MESSAGES.RGB_NOT_SUPPORTED;
+      } else if (error instanceof LightingNotSupportedError) {
+        errorMessage = ERROR_MESSAGES.LIGHTING_NOT_SUPPORTED;
+      }
+      toast.showError(errorMessage);
+    }
+  }, [device, customRgbMode, toast]);
+
+  const notify = useCallback((message: string) => {
+    toast.showInfo(message);
+  }, [toast]);
+
   if (!device || !device.config.lightEnabled || !settings) {
     return null;
   }
@@ -146,7 +195,7 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
         setSettings(newSettings);
       }
 
-      const colors = buildStripedPerKeyColors(device.config.keys, profile.stripes);
+      const colors = profile.build(device.config.keys);
       await device.setPerKeyColors(colors);
       setActiveColorProfileId(profile.id);
     } catch (error) {
@@ -171,6 +220,7 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
   const colorHex = `#${color.r.toString(16).padStart(2, '0')}${color.g.toString(16).padStart(2, '0')}${color.b.toString(16).padStart(2, '0')}`;
 
   return (
+    <div className="space-y-6">
     <div className="flex justify-center">
       <div className="flex flex-wrap gap-8 justify-center">
         {/* Left column - Mode selector */}
@@ -230,39 +280,53 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
 
       {/* Right column - Controls */}
       <div className="space-y-6 w-full sm:w-auto sm:max-w-md">
-        {/* Color profiles - striped per-key presets (e.g. trans pride flag) */}
+        {/* Color profiles - per-key flag presets, applied through custom mode */}
         {device.config.rgb && (
           <div className="space-y-3">
-            <span className="text-sm font-medium text-foreground block">Color Profiles</span>
+            <label htmlFor="color-profile" className="text-sm font-medium text-foreground block">
+              Color Profiles
+            </label>
             {customRgbMode ? (
-              <div className="flex flex-col gap-2">
-                {transFlagProfiles.map((profile) => (
-                  <button
-                    key={profile.id}
-                    onClick={() => applyColorProfile(profile)}
-                    disabled={applyingColorProfileId !== null}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-left transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-                      activeColorProfileId === profile.id
-                        ? 'border-primary bg-accent'
-                        : 'border-border bg-background hover:bg-accent'
-                    }`}
-                    aria-pressed={activeColorProfileId === profile.id}
-                  >
-                    <span className="flex h-6 w-14 rounded overflow-hidden border border-border shrink-0">
-                      {profile.stripes.map((stripe, i) => (
-                        <span key={i} className="flex-1" style={{ backgroundColor: stripe }} />
-                      ))}
-                    </span>
-                    <span className="text-sm text-foreground">
-                      {applyingColorProfileId === profile.id ? 'Applying…' : profile.label}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <Select
+                value={activeColorProfileId ?? undefined}
+                onValueChange={(id) => {
+                  const profile = colorProfiles.find(p => p.id === id);
+                  if (profile) void applyColorProfile(profile);
+                }}
+                disabled={applyingColorProfileId !== null}
+              >
+                <SelectTrigger id="color-profile" className="w-full">
+                  <SelectValue placeholder="Choose a flag…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {colorProfileGroups.map((group) => (
+                    <SelectGroup key={group}>
+                      <SelectLabel>{group}</SelectLabel>
+                      {colorProfiles
+                        .filter(profile => profile.group === group)
+                        .map((profile) => (
+                          <SelectItem key={profile.id} value={profile.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="flex h-4 w-10 rounded-sm overflow-hidden border border-border shrink-0">
+                                {profile.swatch.map((color, i) => (
+                                  <span key={i} className="flex-1" style={{ backgroundColor: color }} />
+                                ))}
+                              </span>
+                              {profile.label}
+                            </span>
+                          </SelectItem>
+                        ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
               <p className="text-sm text-muted-foreground italic">
                 This keyboard doesn&apos;t expose a per-key custom color mode.
               </p>
+            )}
+            {applyingColorProfileId && (
+              <p className="text-xs text-muted-foreground" aria-live="polite">Applying…</p>
             )}
           </div>
         )}
@@ -392,6 +456,36 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
         )}
         </div>
       </div>
+    </div>
+
+    {/* Advanced mode - per-key painting. Full width, since the painting
+        surface needs more room than the controls column allows. */}
+    {device.config.rgb && customRgbMode && (
+      <div className="mx-auto w-full max-w-3xl space-y-4 border-t border-border pt-6">
+        <div className="flex items-center justify-between gap-4">
+          <label htmlFor="advanced-mode" className="flex flex-col">
+            <span className="text-sm font-medium text-foreground">Advanced Mode</span>
+            <span className="text-xs text-muted-foreground">
+              Paint individual keys, then save, export, or import your own profiles.
+            </span>
+          </label>
+          <Switch
+            id="advanced-mode"
+            checked={advancedMode}
+            onCheckedChange={setAdvancedMode}
+            aria-label="Advanced mode"
+          />
+        </div>
+
+        {advancedMode && (
+          <LightingPainter
+            device={device}
+            onApplyColors={applyPerKeyColors}
+            onNotify={notify}
+          />
+        )}
+      </div>
+    )}
     </div>
   );
 }
