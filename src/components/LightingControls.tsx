@@ -8,6 +8,7 @@ import { LightingNotSupportedError, RGBNotSupportedError } from '../errors/Kludg
 import { ERROR_MESSAGES } from '../constants/errorMessages';
 import { ColorWheel } from './ColorWheel';
 import { Badge } from '@/components/ui/badge';
+import { transFlagProfiles, buildStripedPerKeyColors, type ColorProfile } from '../utils/transFlagColorProfiles';
 
 const SPEED_LABELS = ['Very Slow', 'Slow', 'Normal', 'Fast', 'Very Fast'];
 const SLEEP_LABELS = ['5 min', '10 min', '20 min', '30 min', 'Off'];
@@ -25,9 +26,14 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showTopShadow, setShowTopShadow] = useState(false);
   const [showBottomShadow, setShowBottomShadow] = useState(false);
+  const [activeColorProfileId, setActiveColorProfileId] = useState<string | null>(null);
+  const [applyingColorProfileId, setApplyingColorProfileId] = useState<string | null>(null);
 
   const isDemo = !!device.isDemo;
   const selectedModeIndex = settings?.modeIndex ?? null;
+  const customRgbMode = device.config.rgb
+    ? device.config.lightingModes.find(m => m.name.toLowerCase().includes('custom'))
+    : undefined;
 
   // Scroll to initially selected mode after layout and update shadows
   useEffect(() => {
@@ -129,6 +135,35 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
     if (settings) setSettings({ ...settings, sleep: newSleep[0] });
   };
 
+  const applyColorProfile = async (profile: ColorProfile) => {
+    if (!settings || !customRgbMode) return;
+
+    setApplyingColorProfileId(profile.id);
+    try {
+      if (settings.modeIndex !== customRgbMode.index) {
+        const newSettings = { ...settings, modeIndex: customRgbMode.index };
+        await device.setLighting(newSettings);
+        setSettings(newSettings);
+      }
+
+      const colors = buildStripedPerKeyColors(device.config.keys, profile.stripes);
+      await device.setPerKeyColors(colors);
+      setActiveColorProfileId(profile.id);
+    } catch (error) {
+      console.error('Failed to apply color profile:', error);
+
+      let errorMessage: string = ERROR_MESSAGES.LIGHTING_UPDATE_FAILED;
+      if (error instanceof RGBNotSupportedError) {
+        errorMessage = ERROR_MESSAGES.RGB_NOT_SUPPORTED;
+      } else if (error instanceof LightingNotSupportedError) {
+        errorMessage = ERROR_MESSAGES.LIGHTING_NOT_SUPPORTED;
+      }
+      toast.showError(errorMessage);
+    } finally {
+      setApplyingColorProfileId(null);
+    }
+  };
+
   const currentMode = device.config.lightingModes.find(m => m.index === selectedModeIndex);
   const flags = currentMode?.flags;
   const isOffMode = currentMode?.name.toLowerCase().includes('off') || false;
@@ -195,6 +230,43 @@ export function LightingControls({ device, initialSettings }: LightingControlsPr
 
       {/* Right column - Controls */}
       <div className="space-y-6 w-full sm:w-auto sm:max-w-md">
+        {/* Color profiles - striped per-key presets (e.g. trans pride flag) */}
+        {device.config.rgb && (
+          <div className="space-y-3">
+            <span className="text-sm font-medium text-foreground block">Color Profiles</span>
+            {customRgbMode ? (
+              <div className="flex flex-col gap-2">
+                {transFlagProfiles.map((profile) => (
+                  <button
+                    key={profile.id}
+                    onClick={() => applyColorProfile(profile)}
+                    disabled={applyingColorProfileId !== null}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-left transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                      activeColorProfileId === profile.id
+                        ? 'border-primary bg-accent'
+                        : 'border-border bg-background hover:bg-accent'
+                    }`}
+                    aria-pressed={activeColorProfileId === profile.id}
+                  >
+                    <span className="flex h-6 w-14 rounded overflow-hidden border border-border shrink-0">
+                      {profile.stripes.map((stripe, i) => (
+                        <span key={i} className="flex-1" style={{ backgroundColor: stripe }} />
+                      ))}
+                    </span>
+                    <span className="text-sm text-foreground">
+                      {applyingColorProfileId === profile.id ? 'Applying…' : profile.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">
+                This keyboard doesn&apos;t expose a per-key custom color mode.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Sleep timer */}
         {!isOffMode && (
           <div className="space-y-3">
