@@ -308,6 +308,20 @@ These tools are far more capable than keyboard-level macros and work regardless 
 - Disconnect and reconnect your keyboard
 - Try clicking "Reset All Keys to Default" and remapping again
 
+**Linux: "Could not open this keyboard"?**
+
+Two separate causes, check both:
+
+1. **hidraw device permissions.** By default only root can open `/dev/hidraw*`. Fix:
+   ```
+   echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="258a", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/71-royal-kludge.rules
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
+   ```
+   Unplug/replug the keyboard after. The rule must sort before `73-seat-late.rules` (hence the `71-` prefix) or the permission won't apply.
+
+2. **Snap-packaged Chromium.** On Ubuntu, `apt install chromium-browser` installs the Chromium *snap*, which sandboxes away access to `/dev/hidraw*` with no way to grant it back. This blocks WebHID even with permissions fixed above. Use a non-snap browser instead: Google Chrome's `.deb`, or a non-snap Chromium build/PPA.
+
 ## 📄 License
 
 ```

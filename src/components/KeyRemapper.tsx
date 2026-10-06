@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useToast } from '../hooks/useToast';
 import { type FirmwareCode } from '../types/keycode';
 import { getLocaleLabel, getLocalizedKeyName } from '../utils/localeLabels';
+import { downloadDeviceProfile, parseDeviceProfile } from '../utils/deviceProfileFile';
 import { KeyboardCanvas } from './KeyboardCanvas';
 import { Spinner } from './Spinner';
 import { Button } from '@/components/ui/button';
@@ -74,6 +75,7 @@ export function KeyRemapperActionButton({ device }: { device: KeyboardDevice }) 
 
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const isLoading = device.isMappingLoading;
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleResetClick = () => {
     setShowConfirmDialog(true);
@@ -84,17 +86,76 @@ export function KeyRemapperActionButton({ device }: { device: KeyboardDevice }) 
     await handleResetAll();
   };
 
+  const handleExport = () => {
+    downloadDeviceProfile(device);
+    toast.showSuccess('Settings exported');
+  };
+
+  const handleImportFile = async (file: File) => {
+    const result = parseDeviceProfile(await file.text());
+    if (!result.ok) {
+      toast.showError(result.error);
+      return;
+    }
+
+    try {
+      await device.applyMappings(result.data.mappings);
+      if (result.data.lightingSettings && device.config.lightEnabled) {
+        await device.setLighting(result.data.lightingSettings);
+      }
+
+      // bIndex values are layout-specific, so a profile from another model may
+      // land on the wrong keys - worth saying, but not worth blocking.
+      if (result.data.pid && result.data.pid !== device.config.pid) {
+        toast.showInfo(
+          `Imported from a different keyboard (${result.data.keyboardName ?? result.data.pid}); keys may not line up.`,
+        );
+      } else {
+        toast.showSuccess('Settings imported');
+      }
+    } catch (err) {
+      toast.showError(ERROR_MESSAGES.IMPORT_SETTINGS_FAILED);
+      console.error(err);
+    }
+  };
+
   return (
     <>
-      <Button
-        onClick={handleResetClick}
-        disabled={isLoading}
-        variant="outline"
-        size="sm"
-      >
-        {isDemo && <span className="text-primary mr-1">[DEMO]</span>}
-        Reset All Keys to Default
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          onClick={handleResetClick}
+          disabled={isLoading}
+          variant="outline"
+          size="sm"
+        >
+          {isDemo && <span className="text-primary mr-1">[DEMO]</span>}
+          Reset All Keys to Default
+        </Button>
+
+        <Button onClick={handleExport} disabled={isLoading} variant="outline" size="sm">
+          Export Settings
+        </Button>
+
+        <Button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isLoading}
+          variant="outline"
+          size="sm"
+        >
+          Import Settings…
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void handleImportFile(file);
+            e.target.value = ''; // let the same file be picked again
+          }}
+        />
+      </div>
 
       {showConfirmDialog && (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">

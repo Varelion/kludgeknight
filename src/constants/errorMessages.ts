@@ -18,6 +18,7 @@ export const ERROR_MESSAGES = {
   REMAP_FAILED: 'Failed to update key mapping. Please try again.',
   RESET_KEY_FAILED: 'Failed to reset key to default. Please try again.',
   RESET_ALL_FAILED: 'Failed to reset keys. Please try again.',
+  IMPORT_SETTINGS_FAILED: 'Failed to import settings. Please try again.',
 
   // Lighting errors
   LIGHTING_NOT_SUPPORTED: 'This keyboard does not support lighting controls.',

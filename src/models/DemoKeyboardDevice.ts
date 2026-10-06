@@ -147,6 +147,23 @@ export class DemoKeyboardDevice implements KeyboardDevice {
   }
 
   /**
+   * Simulate replacing all mappings at once (no persistence)
+   */
+  async applyMappings(mappings: Map<number, FirmwareCode>): Promise<void> {
+    this.isMappingLoading = true;
+    this.notify?.();
+
+    await this.simulateDelay(150);
+
+    try {
+      this.mappings = new Map(mappings);
+    } finally {
+      this.isMappingLoading = false;
+      this.notify?.();
+    }
+  }
+
+  /**
    * Get mapping for a key index
    */
   getMapping(keyIndex: number): FirmwareCode | undefined {

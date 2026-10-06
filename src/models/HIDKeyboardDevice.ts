@@ -197,6 +197,30 @@ export class HIDKeyboardDevice implements KeyboardDevice {
   }
 
   /**
+   * Replace all mappings at once (e.g. from an imported settings file) and
+   * sync to hardware in a single write.
+   */
+  async applyMappings(mappings: Map<number, FirmwareCode>): Promise<void> {
+    return this.queue.enqueue(async () => {
+      const oldMappings = new Map(this.mappings);
+      this.isMappingLoading = true;
+      this.notify?.();
+      try {
+        this.mappings = new Map(mappings);
+        await this.translator.sendProfile(this.mappings);
+        saveProfile(this.id, this.mappings);
+      } catch (error) {
+        // Rollback on failure
+        this.mappings = oldMappings;
+        throw error;
+      } finally {
+        this.isMappingLoading = false;
+        this.notify?.();
+      }
+    });
+  }
+
+  /**
    * Get mapping for a key index
    * @returns The RK firmware code mapped to this key, or undefined if no custom mapping
    */

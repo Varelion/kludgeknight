@@ -27,6 +27,7 @@ export interface KeyboardDevice {
   setMapping(keyIndex: number, fwCode: FirmwareCode): Promise<void>;
   clearMapping(keyIndex: number): Promise<void>;
   clearAll(): Promise<void>;
+  applyMappings(mappings: Map<number, FirmwareCode>): Promise<void>;
   getMapping(keyIndex: number): FirmwareCode | undefined;
   hasMapping(keyIndex: number): boolean;
 

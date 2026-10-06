@@ -23,7 +23,7 @@ const LightingSettingsSchema = z.object({
   }),
 });
 
-const DeviceProfileSchema = z.object({
+export const DeviceProfileSchema = z.object({
   mappings: z.array(MappingTupleSchema).optional(),
   lightingSettings: LightingSettingsSchema.optional(),
   version: z.number().optional(),

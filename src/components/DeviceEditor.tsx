@@ -194,6 +194,9 @@ export function DeviceEditor({ device, imageManifest, onDisconnect }: DeviceEdit
       {!device.config.lightEnabled && (
         <Card>
           <CardContent>
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <KeyRemapperActionButton device={device} />
+            </div>
             <KeyRemapper device={device} imageManifest={imageManifest} />
           </CardContent>
         </Card>
